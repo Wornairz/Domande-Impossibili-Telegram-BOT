@@ -56,6 +56,9 @@ def domanda(bot, update):
     elif(res[3]==1):
         bot.sendMessage(chat_id=update.message.chat_id, text="Sei stato bannato.\nNon potrai più fare domande.")
         return ConversationHandler.END
+    elif(res[4] >= 3):
+        bot.sendMessage(chat_id=update.message.chat_id, text="Hai raggiunto il limite di domande odierno. Riprova domani.")
+        return ConversationHandler.END
     bot.sendMessage(chat_id=update.message.chat_id, text="Inserisci la tua domanda")
     return 0 #stato successivo del conv handler
     
