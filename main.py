@@ -16,6 +16,23 @@ APPROVA, NONAPPROVA, BANNA = range(3)
 
 def start(bot, update):
     bot.send_message(chat_id=update.message.chat_id, text="Ciao! Sono il bot di www.domandeimpossibili.it\nUsa il comando /domanda per inviare una domanda alla redazione.")
+    global di_db
+    cursor = di_db.cursor()
+    sql = "SELECT * FROM utenti WHERE chat_id = " + str(update.message.from_user.id) + ";"
+    cursor.execute(sql)
+    res = cursor.fetchone()
+    if(res is None):
+        sql = ( 
+            'INSERT INTO utenti('
+            'chat_id, ' + ("username, " if(update.message.from_user.username) != None else '') + 'nome)'
+            ' VALUES ('
+            '' + str(update.message.from_user.id) + ", " + ''
+            '' + (("'" + str(update.message.from_user.username) + "', ") if(update.message.from_user.username) != None else '') + ''
+            '' + "'" + str(update.message.from_user.first_name) +  "')" + ''
+        )
+        print(sql)
+        cursor.execute(sql)
+        di_db.commit()
     print(update.message.chat_id)
 
 def domanda(bot, update):
@@ -62,7 +79,7 @@ def nuova_domanda(bot, update):
                      ]
                     ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        bot.sendMessage(chat_id=chatid_redazione, text="Nuova domanda da @" + (str(update.message.from_user.username) if str(update.message.from_user.username) is not None else update.message.from_user.id) + "\n" + update.message.text, reply_markup=reply_markup)
+        bot.sendMessage(chat_id=chatid_redazione, text="Nuova domanda da @" + (str(update.message.from_user.username) if str(update.message.from_user.username) != 'None' else str(update.message.from_user.id)) + "\n" + update.message.text, reply_markup=reply_markup)
     else:
         bot.sendMessage(chat_id=update.message.chat_id, text="Hai raggiunto il limite di domande odierno. Riprova domani.")
     return ConversationHandler.END
