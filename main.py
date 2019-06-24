@@ -16,7 +16,7 @@ APPROVA, NONAPPROVA, BANNA = range(3)
 
 def start(bot, update):
     bot.send_message(chat_id=update.message.chat_id, text="Ciao! Sono il bot di www.domandeimpossibili.it\nUsa il comando /domanda per inviare una domanda alla redazione.")
-    #print(update.message.chat_id)
+    print(update.message.chat_id)
 
 def domanda(bot, update):
     global di_db
@@ -36,23 +36,35 @@ def domanda(bot, update):
         #print(sql)
         cursor.execute(sql)
         di_db.commit()
-        #print("Nuovo utente registrato")
-    #if(update.message.from_user.username != "None"):
+    elif(res[3]==1):
+        bot.sendMessage(chat_id=update.message.chat_id, text="Sei stato bannato.\nNon potrai più fare domande.")
+        return ConversationHandler.END
     bot.sendMessage(chat_id=update.message.chat_id, text="Inserisci la tua domanda")
     return 0 #stato successivo del conv handler
     
 
 def nuova_domanda(bot, update):
-    #prendere il valore di count nel DB, controllare se < 5 e aumentarlo di 1
-    bot.sendMessage(chat_id=update.message.chat_id, text="La tua domanda è stata registrata.\nSe vuoi mandare un'altra domanda digita nuovamente /domanda")
+    global di_db
+    cursor = di_db.cursor()
+    sql = "SELECT count FROM utenti WHERE chat_id = " + str(update.message.from_user.id) + ";"
+    cursor.execute(sql)
+    res = cursor.fetchone()
+    if(res[0] < 3):
+        res = res[0]+1
+        sql = "UPDATE utenti SET count = " + str(res) + " WHERE chat_id = " + str(update.message.from_user.id) + ";"
+        cursor.execute(sql)
+        di_db.commit()
 
-    keyboard =  [[InlineKeyboardButton("Approva", callback_data=APPROVA)],
-                 [InlineKeyboardButton("Scarta", callback_data=NONAPPROVA),
-                  InlineKeyboardButton("Banna Utente", callback_data=BANNA)
-                 ]
-                ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.sendMessage(chat_id=chatid_redazione, text="Nuova domanda da @" + str(update.message.from_user.username) + "\n" + update.message.text, reply_markup=reply_markup)
+        bot.sendMessage(chat_id=update.message.chat_id, text="La tua domanda è stata registrata.\nSe vuoi mandare un'altra domanda digita nuovamente /domanda")
+        keyboard =  [[InlineKeyboardButton("Approva", callback_data=APPROVA)],
+                     [InlineKeyboardButton("Scarta", callback_data=NONAPPROVA),
+                      InlineKeyboardButton("Banna Utente", callback_data=BANNA)
+                     ]
+                    ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot.sendMessage(chat_id=chatid_redazione, text="Nuova domanda da @" + (str(update.message.from_user.username) if str(update.message.from_user.username) is not None else update.message.from_user.id) + "\n" + update.message.text, reply_markup=reply_markup)
+    else:
+        bot.sendMessage(chat_id=update.message.chat_id, text="Hai raggiunto il limite di domande odierno. Riprova domani.")
     return ConversationHandler.END
 
 def cancel(bot, update):
@@ -62,14 +74,33 @@ def cancel(bot, update):
 def button(bot, update):
     msgID = update.callback_query.message.message_id
     msgChatID = update.callback_query.message.chat.id
+    msgText = update.callback_query.message.text
     if(str(update.callback_query.data) == str(APPROVA)):
-        msgText = update.callback_query.message.text + "\n\n" + "Approvata da " + update.callback_query.from_user.first_name + "\n\n#domandeimpossibili"
+        msgText = msgText + "\n\n" + "Approvata da " + update.callback_query.from_user.first_name + "\n\n#domandeimpossibili"
         bot.editMessageText(text = msgText, chat_id = msgChatID, message_id = msgID, reply_markup = None)
     elif(str(update.callback_query.data) == str(NONAPPROVA)):
         bot.deleteMessage(chat_id = msgChatID, message_id = msgID)
     elif(str(update.callback_query.data) == str(BANNA)):
-        print("prova")
+        msgUser = msgText[msgText.find('@')+1:msgText.find('\n')]
+        msgText = "L'utente @" + msgUser + " è stato bannato."
+        bot.editMessageText(text = msgText, chat_id = msgChatID, message_id = msgID, reply_markup = None)
+        global di_db
+        cursor = di_db.cursor()
+        sql = ('UPDATE utenti SET banned = 1 WHERE '
+               '' + ("chat_id = " if msgUser.isdigit() else "username = ") + ''
+               '\'' + msgUser + "';"
+            )
+        #print(sql)
+        cursor.execute(sql)
+        di_db.commit()
 
+def clean_requests_limits(bot, job):
+    print("Reset dei limiti giornaliero")
+    global di_db
+    cursor = di_db.cursor()
+    sql = "UPDATE utenti SET count = 0;"
+    cursor.execute(sql)
+    di_db.commit()
 
 def read_db_conf():
     global di_db
@@ -82,19 +113,21 @@ def read_db_conf():
             passwd = doc["db_psw" ],
             database = doc["db_name"]
         )
+        print("DB connection successfull")
     except:
         print("DB connection error")
-        return
-    finally:
-        print("DB connection successfull")
+    return
 
 def main():
     print("Bot started at " + str(datetime.datetime.now().time()))
-
+    #job che pulisce ogni 24 il numero (limite) di domande fatte
     read_db_conf()
 
     updater = Updater(token=token)
     dp = updater.dispatcher
+
+    j = updater.job_queue
+    j.run_daily(clean_requests_limits, datetime.time(00, 00, 00))
 
     start_handler = CommandHandler('start', start)
     dp.add_handler(start_handler)
