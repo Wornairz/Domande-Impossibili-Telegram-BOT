@@ -14,12 +14,23 @@ chatid_redazione = open('chatid.conf', 'r').read().replace("\n", "")
 
 APPROVA, NONAPPROVA, BANNA = range(3)
 
+def query(sql):
+    try:
+        global di_db
+        cursor = di_db.cursor()
+        cursor.execute(sql)
+        if not(sql.startswith("SELECT")):
+            di_db.commit()
+        return cursor
+    except mysql.connector.errors.OperationalError:
+        print("Connessione MySQL scaduta, riavvio")
+        read_db_conf()
+        return query(sql)
+
 def start(bot, update):
     bot.send_message(chat_id=update.message.chat_id, text="Ciao! Sono il bot di www.domandeimpossibili.it\nUsa il comando /domanda per inviare una domanda alla redazione.")
-    global di_db
-    cursor = di_db.cursor()
     sql = "SELECT * FROM utenti WHERE chat_id = " + str(update.message.from_user.id) + ";"
-    cursor.execute(sql)
+    cursor = query(sql)
     res = cursor.fetchone()
     if(res is None):
         sql = ( 
@@ -30,16 +41,12 @@ def start(bot, update):
             '' + (("'" + str(update.message.from_user.username) + "', ") if(update.message.from_user.username) != None else '') + ''
             '' + "'" + str(update.message.from_user.first_name) +  "')" + ''
         )
-        print(sql)
-        cursor.execute(sql)
-        di_db.commit()
+        cursor = query(sql)
     print(update.message.chat_id)
 
 def domanda(bot, update):
-    global di_db
-    cursor = di_db.cursor()
     sql = "SELECT * FROM utenti WHERE chat_id = " + str(update.message.from_user.id) + ";"
-    cursor.execute(sql)
+    cursor = query(sql)
     res = cursor.fetchone()
     if(res is None):
         sql = ( 
@@ -50,9 +57,7 @@ def domanda(bot, update):
             '' + (("'" + str(update.message.from_user.username) + "', ") if(update.message.from_user.username) != None else '') + ''
             '' + "'" + str(update.message.from_user.first_name) +  "')" + ''
         )
-        #print(sql)
-        cursor.execute(sql)
-        di_db.commit()
+        cursor = query(sql)
     elif(res[3]==1):
         bot.sendMessage(chat_id=update.message.chat_id, text="Sei stato bannato.\nNon potrai più fare domande.")
         return ConversationHandler.END
@@ -64,16 +69,13 @@ def domanda(bot, update):
     
 
 def nuova_domanda(bot, update):
-    global di_db
-    cursor = di_db.cursor()
     sql = "SELECT count FROM utenti WHERE chat_id = " + str(update.message.from_user.id) + ";"
-    cursor.execute(sql)
+    cursor = query(sql)
     res = cursor.fetchone()
     if(res[0] < 3):
         res = res[0]+1
         sql = "UPDATE utenti SET count = " + str(res) + " WHERE chat_id = " + str(update.message.from_user.id) + ";"
-        cursor.execute(sql)
-        di_db.commit()
+        cursor = query(sql)
 
         bot.sendMessage(chat_id=update.message.chat_id, text="La tua domanda è stata registrata.\nSe vuoi mandare un'altra domanda digita nuovamente /domanda")
         keyboard =  [[InlineKeyboardButton("Approva", callback_data=APPROVA)],
@@ -104,25 +106,20 @@ def button(bot, update):
         msgUser = msgText[msgText.find('@')+1:msgText.find('\n')]
         msgText = "L'utente @" + msgUser + " è stato bannato."
         bot.editMessageText(text = msgText, chat_id = msgChatID, message_id = msgID, reply_markup = None)
-        global di_db
-        cursor = di_db.cursor()
         sql = ('UPDATE utenti SET banned = 1 WHERE '
                '' + ("chat_id = " if msgUser.isdigit() else "username = ") + ''
                '\'' + msgUser + "';"
             )
         #print(sql)
-        cursor.execute(sql)
-        di_db.commit()
+        cursor = query(sql)
 
 def clean_requests_limits(bot, job):
     print("Reset dei limiti giornaliero")
-    global di_db
-    cursor = di_db.cursor()
     sql = "UPDATE utenti SET count = 0;"
-    cursor.execute(sql)
-    di_db.commit()
+    query(sql)
 
 def read_db_conf():
+    print("Lettura della configurazione del database")
     global di_db
     conf = open("dbconf.yaml", "r")
     doc = yaml.safe_load(conf)
@@ -147,7 +144,8 @@ def main():
     dp = updater.dispatcher
 
     j = updater.job_queue
-    j.run_daily(clean_requests_limits, datetime.time(00, 00, 00))
+    j.run_daily(clean_requests_limits, datetime.time(00, 00, 00), days=(0, 1, 2, 3, 4, 5, 6))
+    j.start()
 
     start_handler = CommandHandler('start', start)
     dp.add_handler(start_handler)
